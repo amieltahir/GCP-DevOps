@@ -1,1 +1,188 @@
+1. in cloud shell -> gcloud auth list
+2. gcloud config set account student-04-027d2d7b49ab@qwiklabs.net
+3. gcloud config list project
+4.
+
+export PROJECT_ID=$(gcloud config get-value project)
+export PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+export REGION=us-west1
+gcloud config set compute/region $REGION
+
+5. Run the following to enable necessary Google services:
+
+gcloud services enable \
+  cloudresourcemanager.googleapis.com \
+  container.googleapis.com \
+  artifactregistry.googleapis.com \
+  containerregistry.googleapis.com \
+  containerscanning.googleapis.com
+
+6. clone lab
+
+git clone https://github.com/GoogleCloudPlatform/cloud-code-samples/
+cd ~/cloud-code-samples
+
+7. Provision the infrastructure used in this lab
+In this lab you will deploy code to Kubernetes Engine (GKE).
+Run the setup script below to prepare this infrastructure:
+
+gcloud container clusters create container-dev-cluster --zone=us-west1-c
+
+Default change: VPC-native is the default mode during cluster creation for versions greater than 1.21.0-gke.1500. To create advanced routes based clusters, please pass the `--no-enable-ip-alias` flag
+Default change: During creation of nodepools or autoscaling configuration changes for cluster versions greater than 1.24.1-gke.800 a default location policy is applied. For Spot and PVM it defaults to ANY, and for all other VM kinds a BALANCED policy is used. To change the default values use the `--location-policy` flag.
+Note: Your Pod address range (`--cluster-ipv4-cidr`) can accommodate at most 1008 node(s).
+Creating cluster container-dev-cluster in us-west1-c... Cluster is being health-checked (master is healthy)...done.                                                                                                                           
+Created [https://container.googleapis.com/v1/projects/qwiklabs-gcp-03-adf87ab64f78/zones/us-west1-c/clusters/container-dev-cluster].
+To inspect the contents of your cluster, go to: https://console.cloud.google.com/kubernetes/workload_/gcloud/us-west1-c/container-dev-cluster?project=qwiklabs-gcp-03-adf87ab64f78
+kubeconfig entry generated for container-dev-cluster.
+NAME: container-dev-cluster
+LOCATION: us-west1-c
+MASTER_VERSION: 1.27.3-gke.100
+MASTER_IP: 35.233.167.218
+MACHINE_TYPE: e2-medium
+NODE_VERSION: 1.27.3-gke.100
+NUM_NODES: 3
+STATUS: RUNNING
+
+8. Task 2. Working with container images
+Create a Docker Repository on Artifact registry
+Artifact Registry supports managing container images and language packages. Different artifact types require different specifications. For example, the requests for Maven dependencies are different from requests for Node dependencies.
+To support the different API specifications, Artifact Registry needs to know what format you want the API responses to follow. To do this you will create a repository and pass in the --repository-format flag indicating the type of repository desired.
+
+From Cloud Shell run the following command to create a repository for Docker images:
+
+gcloud artifacts repositories create container-dev-repo --repository-format=docker \
+  --location=$REGION \
+  --description="Docker repository for Container Dev Workshop"
+
+9. Configure Docker Authentication to Artifact Registry
+When connecting to Artifact Registry credentials are required in order to provide access. Rather than set up separate credentials, Docker can be configured to use your gcloud credentials seamlessly.
+
+From Cloud Shell run the following command to configure Docker to use the Google Cloud CLI to authenticate requests to Artifact Registry in the us-west1 region:
+
+gcloud auth configure-docker us-west1-docker.pkg.dev
+
+{
+  "credHelpers": {
+    "asia-docker.pkg.dev": "gcloud",
+    "asia-east1-docker.pkg.dev": "gcloud",
+    "asia-east2-docker.pkg.dev": "gcloud",
+    "asia-northeast1-docker.pkg.dev": "gcloud",
+    "asia-northeast2-docker.pkg.dev": "gcloud",
+    "asia-northeast3-docker.pkg.dev": "gcloud",
+    "asia-south1-docker.pkg.dev": "gcloud",
+    "asia-south2-docker.pkg.dev": "gcloud",
+    "asia-southeast1-docker.pkg.dev": "gcloud",
+    "asia-southeast2-docker.pkg.dev": "gcloud",
+    "australia-southeast1-docker.pkg.dev": "gcloud",
+    "australia-southeast2-docker.pkg.dev": "gcloud",
+    "europe-docker.pkg.dev": "gcloud",
+    "europe-central2-docker.pkg.dev": "gcloud",
+    "europe-north1-docker.pkg.dev": "gcloud",
+    "europe-southwest1-docker.pkg.dev": "gcloud",
+    "europe-west1-docker.pkg.dev": "gcloud",
+    "europe-west10-docker.pkg.dev": "gcloud",
+    "europe-west12-docker.pkg.dev": "gcloud",
+    "europe-west2-docker.pkg.dev": "gcloud",
+    "europe-west3-docker.pkg.dev": "gcloud",
+    "europe-west4-docker.pkg.dev": "gcloud",
+    "europe-west6-docker.pkg.dev": "gcloud",
+    "europe-west8-docker.pkg.dev": "gcloud",
+    "europe-west9-docker.pkg.dev": "gcloud",
+    "me-central1-docker.pkg.dev": "gcloud",
+    "me-central2-docker.pkg.dev": "gcloud",
+    "me-west1-docker.pkg.dev": "gcloud",
+    "northamerica-northeast1-docker.pkg.dev": "gcloud",
+    "northamerica-northeast2-docker.pkg.dev": "gcloud",
+    "southamerica-east1-docker.pkg.dev": "gcloud",
+    "us-docker.pkg.dev": "gcloud",
+    "us-central1-docker.pkg.dev": "gcloud",
+    "us-east1-docker.pkg.dev": "gcloud",
+    "us-east4-docker.pkg.dev": "gcloud",
+    "us-east5-docker.pkg.dev": "gcloud",
+    "us-east7-docker.pkg.dev": "gcloud",
+    "us-south1-docker.pkg.dev": "gcloud",
+    "us-west1-docker.pkg.dev": "gcloud",
+    "us-west2-docker.pkg.dev": "gcloud",
+    "us-west3-docker.pkg.dev": "gcloud",
+    "us-west4-docker.pkg.dev": "gcloud"
+  }
+}
+Adding credentials for: us-west1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+
+10. Explore the sample Application
+A sample application is provided in the git repository you cloned.
+
+Change into the java directory and review the application code:
+
+cd ~/cloud-code-samples/java/java-hello-world
+
+The folder contains an example Java application that renders a simple web page: in addition to various files not relevant for this specific lab, it contains the source code, under the src folder, and a Dockerfile you will use to build a container image locally.
+
+Build the Container Image
+Before you can store container images in Artifact Registry you need to create one.
+
+Run the following command to build the container image and tag it properly:
+
+student_04_027d2d7b49ab@cloudshell:~/cloud-code-samples/java/java-hello-world (qwiklabs-gcp-03-adf87ab64f78)$ cat Dockerfile 
+# Use maven to compile the java application.
+FROM maven:3-jdk-11-slim AS build-env
+
+# Set the working directory to /app
+WORKDIR /app
+
+# copy the pom.xml file to download dependencies
+COPY pom.xml ./
+
+# download dependencies as specified in pom.xml
+# building dependency layer early will speed up compile time when pom is unchanged
+RUN mvn verify --fail-never
+
+# Copy the rest of the working directory contents into the container
+COPY . ./
+
+# Compile the application.
+RUN mvn -Dmaven.test.skip=true package
+
+# Build runtime image.
+FROM openjdk:11.0.16-jre-slim
+
+# Copy the compiled files over.
+COPY --from=build-env /app/target/ /app/
+
+# Starts java app with debugging server at port 5005.
+CMD ["java", "-jar", "/app/hello-world-1.0.0.jar"]
+
+docker build -t us-west1-docker.pkg.dev/qwiklabs-gcp-03-adf87ab64f78/container-dev-repo/java-hello-world:tag1 .
+
+11. Push the Container Image to Artifact Registry
+Run the following command to push the container image to the repository you created:
+
+docker push us-west1-docker.pkg.dev/qwiklabs-gcp-03-adf87ab64f78/container-dev-repo/java-hello-world:tag1
+
+Review the image in Artifact Registry
+In Artifact Registry > Repositories, click into container-dev-repo and check that the java-hello-world image is there.
+
+Click on the image and note the image tagged tag1. You can see that Vulnerability Scanning is running or already completed and the number of vulnerabilities detected is visible.
+
+----------------
+
+10. 
+
+Task 3. Integration with Cloud Code
+In this section you use the Artifact Registry Docker image repository with Cloud Code.
+
+Deploy the Application to GKE Cluster from Cloud Code
+From the java-hello-world folder run the following command to open Cloud Shell Editor and add the application folder to this workspace:
+
+cloudshell workspace .
+
+The Cloud Shell editor will open with the explorer in the application folder.
+
+If you get a pop-up asking to exclude Java project settings files from the workspace, click on Exclude in workspace .
+
+The following steps will require you to enter your Artifact Registry repository location. The format for the location is:
+
+us-west1-docker.pkg.dev/qwiklabs-gcp-03-adf87ab64f78/container-dev-repo
 
