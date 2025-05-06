@@ -31,3 +31,35 @@ sed -i "s/Welcome to nginx!/Google Cloud Platform - $HOSTNAME/" /var/www/html/in
 
 
 gcloud compute instance-groups managed create global-mig --base-instance-name=web-server --template=global-template --size=2 --zone=us-east1-b
+
+gcloud compute firewall-rules create permit-tcp-rule-123 --direction=INGRESS --priority=1000 --network=default --action=ALLOW --rules=tcp:80 --source-ranges=0.0.0.0/0 --target-tags=allow-health-check
+
+gcloud compute health-checks create http global-health-check --port 80
+
+ gcloud compute addresses create lb-ipv4-1 \
+  --ip-version=IPV4 \
+  --global
+
+gcloud compute addresses describe lb-ipv4-1 \
+  --format="get(address)" \
+  --global
+35.244.178.211
+
+gcloud compute backend-services create global-backend-service --protocol=HTTP --health-checks=global-health-check --port-name=http --global
+
+gcloud compute instance-groups managed set-named-ports global-mig   --named-ports=http:80   --zone=us-east1-b
+
+gcloud compute backend-services add-backend global-backend-service \
+  --instance-group=global-mig \
+  --instance-group-zone=us-east1-b \
+  --global
+
+gcloud compute url-maps create global-url-map \
+  --default-service=global-backend-service
+
+gcloud compute forwarding-rules create global-forwarding-rule \
+  --address=lb-ipv4-1 \
+  --global \
+  --target-http-proxy=global-http-proxy \
+  --ports=80
+
