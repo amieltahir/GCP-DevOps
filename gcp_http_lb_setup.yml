@@ -1,0 +1,110 @@
+- name: GCP: Set up Jumphost and HTTP Load Balancer with Managed Instance Group
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    project_id: your-project-id  # <-- Change this later
+    zone: us-east1-b
+    region: us-east1
+    jump_host: nucleus-jumphost-198
+    instance_template: global-template
+    instance_group: global-mig
+    firewall_rule: permit-tcp-rule-123
+    health_check: global-health-check
+    reserved_ip: lb-ipv4-1
+    backend_service: global-backend-service
+    url_map: global-url-map
+    http_proxy: global-http-proxy
+    forwarding_rule: global-forwarding-rule
+
+  tasks:
+
+    - name: Set GCP project
+      command: gcloud config set project {{ project_id }}
+
+    - name: Create jumphost instance
+      command: >
+        gcloud compute instances create {{ jump_host }}
+        --zone={{ zone }}
+        --machine-type=e2-micro
+
+    - name: Create instance template with nginx startup script
+      command: >
+        gcloud compute instance-templates create {{ instance_template }}
+        --machine-type=e2-medium
+        --image-family=debian-11
+        --image-project=debian-cloud
+        --tags=allow-health-check
+        --metadata=startup-script='#! /bin/bash
+        apt-get update
+        apt-get install -y nginx
+        service nginx start
+        HOSTNAME=$(hostname)
+        sed -i "s/Welcome to nginx!/Google Cloud Platform - $HOSTNAME/" /var/www/html/index.nginx-debian.html'
+
+    - name: Create managed instance group
+      command: >
+        gcloud compute instance-groups managed create {{ instance_group }}
+        --base-instance-name=web-server
+        --template={{ instance_template }}
+        --size=2
+        --zone={{ zone }}
+
+    - name: Create firewall rule for port 80
+      command: >
+        gcloud compute firewall-rules create {{ firewall_rule }}
+        --direction=INGRESS
+        --priority=1000
+        --network=default
+        --action=ALLOW
+        --rules=tcp:80
+        --source-ranges=0.0.0.0/0
+        --target-tags=allow-health-check
+
+    - name: Create HTTP health check
+      command: >
+        gcloud compute health-checks create http {{ health_check }} --port 80
+
+    - name: Reserve global static external IP
+      command: >
+        gcloud compute addresses create {{ reserved_ip }} --ip-version=IPV4 --global
+
+    - name: Create backend service and attach health check
+      command: >
+        gcloud compute backend-services create {{ backend_service }}
+        --protocol=HTTP
+        --health-checks={{ health_check }}
+        --port-name=http
+        --global
+
+    - name: Set named ports for instance group
+      command: >
+        gcloud compute instance-groups managed set-named-ports {{ instance_group }}
+        --named-ports=http:80
+        --zone={{ zone }}
+
+    - name: Add instance group to backend service
+      command: >
+        gcloud compute backend-services add-backend {{ backend_service }}
+        --instance-group={{ instance_group }}
+        --instance-group-zone={{ zone }}
+        --global
+
+    - name: Create URL map to route requests
+      command: >
+        gcloud compute url-maps create {{ url_map }}
+        --default-service={{ backend_service }}
+
+    - name: Create target HTTP proxy
+      command: >
+        gcloud compute target-http-proxies create {{ http_proxy }}
+        --url-map={{ url_map }}
+
+    - name: Create global forwarding rule to route requests to proxy
+      command: >
+        gcloud compute forwarding-rules create {{ forwarding_rule }}
+        --address={{ reserved_ip }}
+        --global
+        --target-http-proxy={{ http_proxy }}
+        --ports=80
