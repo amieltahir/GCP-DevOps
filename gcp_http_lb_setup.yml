@@ -1,5 +1,5 @@
 ---
-- name: GCP: Set up Jumphost and HTTP Load Balancer with Managed Instance Group
+- name: Set up Jumphost and HTTP Load Balancer with Managed Instance Group
   hosts: localhost
   connection: local
   gather_facts: no
