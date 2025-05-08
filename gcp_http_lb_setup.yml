@@ -1,4 +1,3 @@
----
 - name: Set up Jumphost and HTTP Load Balancer with Managed Instance Group
   hosts: localhost
   connection: local
@@ -25,6 +24,28 @@
     forwarding_rule: global-forwarding-rule
 
   tasks:
+    - name: Authenticate gcloud and set project
+      shell: |
+        gcloud auth login --brief
+        gcloud config set project {{ project_id }}
+        gcloud config set compute/zone {{ zone }}
+      register: auth_result
+      environment:
+        CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
+      changed_when: false
+      failed_when: "'ERROR' in auth_result.stderr"
+
+    - name: Get active gcloud account
+      shell: gcloud auth list --filter=status:ACTIVE --format="value(account)"
+      register: active_account
+      changed_when: false
+      failed_when: active_account.stdout == ""
+
+    - name: Set gcloud account explicitly
+      shell: gcloud config set account {{ active_account.stdout }}
+      register: set_account
+      changed_when: false
+
     - name: Create jumphost instance
       command: >
         gcloud compute instances create nucleus-jumphost-198
@@ -33,9 +54,6 @@
         --image-family=debian-11
         --image-project=debian-cloud
       register: jumphost
-
-    - debug:
-        var: jumphost.stdout_lines
 
     - name: Write startup script to file
       copy:
@@ -53,9 +71,6 @@
         --metadata-from-file startup-script=./startup.sh
       register: template
 
-    - debug:
-        var: template.stdout_lines
-
     - name: Create managed instance group
       command: >
         gcloud compute instance-groups managed create {{ instance_group }}
@@ -64,9 +79,6 @@
         --size=2
         --zone={{ zone }}
       register: mig
-
-    - debug:
-        var: mig.stdout_lines
 
     - name: Create firewall rule
       command: >
@@ -80,17 +92,11 @@
         --target-tags=allow-health-check
       register: firewall
 
-    - debug:
-        var: firewall.stdout_lines
-
     - name: Create health check
       command: >
         gcloud compute health-checks create http {{ health_check }}
         --port 80
       register: health
-
-    - debug:
-        var: health.stdout_lines
 
     - name: Reserve global static IP
       command: >
@@ -100,18 +106,12 @@
       register: reserve_ip
       ignore_errors: true
 
-    - debug:
-        var: reserve_ip.stdout_lines
-
     - name: Get global IP address
       command: >
         gcloud compute addresses describe {{ reserved_ip }}
         --format="get(address)"
         --global
       register: lb_ip_result
-
-    - debug:
-        var: lb_ip_result.stdout
 
     - name: Create backend service
       command: >
@@ -122,18 +122,12 @@
         --global
       register: backend
 
-    - debug:
-        var: backend.stdout_lines
-
     - name: Set named ports on MIG
       command: >
         gcloud compute instance-groups managed set-named-ports {{ instance_group }}
         --named-ports=http:80
         --zone={{ zone }}
       register: named_ports
-
-    - debug:
-        var: named_ports.stdout_lines
 
     - name: Add backend to backend service
       command: >
@@ -143,17 +137,11 @@
         --global
       register: backend_add
 
-    - debug:
-        var: backend_add.stdout_lines
-
     - name: Create URL map
       command: >
         gcloud compute url-maps create {{ url_map }}
         --default-service={{ backend_service }}
       register: urlmap
-
-    - debug:
-        var: urlmap.stdout_lines
 
     - name: Create target HTTP proxy
       command: >
@@ -161,9 +149,6 @@
         --url-map={{ url_map }}
       register: proxy_create
       ignore_errors: true
-
-    - debug:
-        var: proxy_create.stdout_lines
 
     - name: Create forwarding rule
       command: >
@@ -175,9 +160,6 @@
       register: fwd_rule
       ignore_errors: true
 
-    - debug:
-        var: fwd_rule.stdout_lines
-
     - name: Wait for propagation
       pause:
         seconds: 30
@@ -186,5 +168,6 @@
       command: curl -s http://{{ lb_ip_result.stdout }}
       register: curl_test
 
-    - debug:
+    - name: Show curl output
+      debug:
         var: curl_test.stdout
