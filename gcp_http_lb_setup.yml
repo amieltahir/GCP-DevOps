@@ -24,27 +24,19 @@
     forwarding_rule: global-forwarding-rule
 
   tasks:
-    - name: Authenticate gcloud and set project
-      shell: |
-        gcloud auth login --brief
-        gcloud config set project {{ project_id }}
-        gcloud config set compute/zone {{ zone }}
-      register: auth_result
-      environment:
-        CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
-      changed_when: false
-      failed_when: "'ERROR' in auth_result.stderr"
+    - name: Set GCP project
+      shell: gcloud config set project {{ project_id }}
+      register: set_project
+      changed_when: "'Updated property' in set_project.stdout"
+    - debug:
+        msg: "{{ set_project.stdout }}"
 
-    - name: Get active gcloud account
-      shell: gcloud auth list --filter=status:ACTIVE --format="value(account)"
-      register: active_account
-      changed_when: false
-      failed_when: active_account.stdout == ""
-
-    - name: Set gcloud account explicitly
-      shell: gcloud config set account {{ active_account.stdout }}
-      register: set_account
-      changed_when: false
+    - name: Set GCP compute zone
+      shell: gcloud config set compute/zone {{ zone }}
+      register: set_zone
+      changed_when: "'Updated property' in set_zone.stdout"
+    - debug:
+        msg: "{{ set_zone.stdout }}"
 
     - name: Create jumphost instance
       command: >
@@ -54,6 +46,8 @@
         --image-family=debian-11
         --image-project=debian-cloud
       register: jumphost
+    - debug:
+        msg: "{{ jumphost.stdout }}"
 
     - name: Write startup script to file
       copy:
@@ -70,6 +64,8 @@
         --tags=allow-health-check
         --metadata-from-file startup-script=./startup.sh
       register: template
+    - debug:
+        msg: "{{ template.stdout }}"
 
     - name: Create managed instance group
       command: >
@@ -79,6 +75,8 @@
         --size=2
         --zone={{ zone }}
       register: mig
+    - debug:
+        msg: "{{ mig.stdout }}"
 
     - name: Create firewall rule
       command: >
@@ -91,12 +89,16 @@
         --source-ranges=0.0.0.0/0
         --target-tags=allow-health-check
       register: firewall
+    - debug:
+        msg: "{{ firewall.stdout }}"
 
     - name: Create health check
       command: >
         gcloud compute health-checks create http {{ health_check }}
         --port 80
       register: health
+    - debug:
+        msg: "{{ health.stdout }}"
 
     - name: Reserve global static IP
       command: >
@@ -105,6 +107,8 @@
         --global
       register: reserve_ip
       ignore_errors: true
+    - debug:
+        msg: "{{ reserve_ip.stdout | default('Already exists or skipped') }}"
 
     - name: Get global IP address
       command: >
@@ -112,6 +116,8 @@
         --format="get(address)"
         --global
       register: lb_ip_result
+    - debug:
+        msg: "Load balancer IP: {{ lb_ip_result.stdout }}"
 
     - name: Create backend service
       command: >
@@ -121,6 +127,8 @@
         --port-name=http
         --global
       register: backend
+    - debug:
+        msg: "{{ backend.stdout }}"
 
     - name: Set named ports on MIG
       command: >
@@ -128,6 +136,8 @@
         --named-ports=http:80
         --zone={{ zone }}
       register: named_ports
+    - debug:
+        msg: "{{ named_ports.stdout }}"
 
     - name: Add backend to backend service
       command: >
@@ -136,12 +146,16 @@
         --instance-group-zone={{ zone }}
         --global
       register: backend_add
+    - debug:
+        msg: "{{ backend_add.stdout }}"
 
     - name: Create URL map
       command: >
         gcloud compute url-maps create {{ url_map }}
         --default-service={{ backend_service }}
       register: urlmap
+    - debug:
+        msg: "{{ urlmap.stdout }}"
 
     - name: Create target HTTP proxy
       command: >
@@ -149,6 +163,8 @@
         --url-map={{ url_map }}
       register: proxy_create
       ignore_errors: true
+    - debug:
+        msg: "{{ proxy_create.stdout | default('Proxy already exists or failed gracefully') }}"
 
     - name: Create forwarding rule
       command: >
@@ -159,6 +175,8 @@
         --ports=80
       register: fwd_rule
       ignore_errors: true
+    - debug:
+        msg: "{{ fwd_rule.stdout | default('Forwarding rule already exists or failed gracefully') }}"
 
     - name: Wait for propagation
       pause:
