@@ -1,0 +1,133 @@
+
+PROJECT_ID=qwiklabs-gcp-01-f7e78b337a51
+ZONE=us-east1-c
+REGION=us-east1
+TEMPLATE_NAME=global-template
+INSTANCE_GROUP=global-mig
+RESERVED_IP=lb-ipv4-1
+BACKEND_SERVICE=global-backend-service
+HEALTH_CHECK=global-health-check
+URL_MAP=global-url-map
+PROXY=global-http-proxy
+FORWARDING_RULE=global-forwarding-rule
+
+
+gcloud compute instances create nucleus-jumphost-210 \
+  --zone=$ZONE \
+  --machine-type=e2-micro \
+  --image-family=debian-11 \
+  --image-project=debian-cloud
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/zones/us-east1-c/instances/nucleus-jumphost-210].
+NAME: nucleus-jumphost-210
+ZONE: us-east1-c
+MACHINE_TYPE: e2-micro
+PREEMPTIBLE: 
+INTERNAL_IP: 10.142.0.2
+EXTERNAL_IP: 35.196.64.97
+
+ cat > startup.sh << 'EOF'
+#!/bin/bash
+apt-get update
+apt-get install -y nginx
+service nginx start
+HOSTNAME=$(hostname)
+sed -i "s/Welcome to nginx!/Google Cloud Platform - $HOSTNAME/" /var/www/html/index.nginx-debian.html
+EOF
+
+chmod +x startup.sh 
+
+gcloud compute instance-templates create $TEMPLATE_NAME \
+  --machine-type=e2-medium \
+  --image-family=debian-11 \
+  --image-project=debian-cloud \
+  --tags=allow-health-check \
+  --metadata-from-file startup-script=./startup.sh
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/instanceTemplates/global-template].
+NAME: global-template
+MACHINE_TYPE: e2-medium
+PREEMPTIBLE: 
+CREATION_TIMESTAMP: 2025-05-13T11:11:49.239-07:00
+
+gcloud compute instance-groups managed create $INSTANCE_GROUP \
+  --base-instance-name=web-server \
+  --template=$TEMPLATE_NAME \
+  --size=2 \
+  --zone=$ZONE
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/zones/us-east1-c/instanceGroupManagers/global-mig].
+NAME: global-mig
+LOCATION: us-east1-c
+SCOPE: zone
+BASE_INSTANCE_NAME: web-server
+SIZE: 0
+TARGET_SIZE: 2
+INSTANCE_TEMPLATE: global-template
+AUTOSCALED: no
+
+
+gcloud compute firewall-rules create accept-tcp-rule-627 \
+  --direction=INGRESS \
+  --priority=1000 \
+  --network=default \
+  --action=ALLOW \
+  --rules=tcp:80 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=allow-health-check
+Creating firewall...working..Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/firewalls/accept-tcp-rule-627].                                                                                       
+Creating firewall...done.                                                                                                                                                                                                                      
+NAME: accept-tcp-rule-627
+NETWORK: default
+DIRECTION: INGRESS
+PRIORITY: 1000
+ALLOW: tcp:80
+DENY: 
+DISABLED: False
+
+gcloud compute health-checks create http $HEALTH_CHECK --port 80
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/healthChecks/global-health-check].
+NAME: global-health-check
+PROTOCOL: HTTP
+
+gcloud compute addresses create $RESERVED_IP --ip-version=IPV4 --global || true
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/addresses/lb-ipv4-1].
+
+LB_IP=$(gcloud compute addresses describe $RESERVED_IP --format="get(address)" --global)
+echo "LB IP: $LB_IP"
+LB IP: 35.186.255.115
+
+ gcloud compute backend-services create $BACKEND_SERVICE \
+  --protocol=HTTP \
+  --health-checks=$HEALTH_CHECK \
+  --port-name=http \
+  --global
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/backendServices/global-backend-service].
+NAME: global-backend-service
+BACKENDS: 
+PROTOCOL: HTTP
+
+gcloud compute instance-groups managed set-named-ports $INSTANCE_GROUP \
+  --named-ports=http:80 \
+  --zone=$ZONE
+Updated [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/zones/us-east1-c/instanceGroups/global-mig].
+
+gcloud compute backend-services add-backend $BACKEND_SERVICE \
+  --instance-group=$INSTANCE_GROUP \
+  --instance-group-zone=$ZONE \
+  --global
+Updated [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/backendServices/global-backend-service].
+
+cloud compute url-maps create $URL_MAP --default-service=$BACKEND_SERVICE
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/urlMaps/global-url-map].
+NAME: global-url-map
+DEFAULT_SERVICE: backendServices/global-backend-service
+
+ gcloud compute target-http-proxies create $PROXY --url-map=$URL_MAP || true
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/targetHttpProxies/global-http-proxy].
+NAME: global-http-proxy
+URL_MAP: global-url-map
+
+gcloud compute forwarding-rules create $FORWARDING_RULE \
+  --address=$RESERVED_IP \
+  --global \
+  --target-http-proxy=$PROXY \
+  --ports=80 || true
+Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-01-f7e78b337a51/global/forwardingRules/global-forwarding-rule].
