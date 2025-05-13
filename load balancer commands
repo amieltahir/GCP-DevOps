@@ -2,7 +2,7 @@
 PROJECT_ID=qwiklabs-gcp-01-f7e78b337a51
 ZONE=us-east1-c
 REGION=us-east1
-TEMPLATE_NAME=global-template
+TEMPLATE_NAME=global
 INSTANCE_GROUP=global-mig
 RESERVED_IP=lb-ipv4-1
 BACKEND_SERVICE=global-backend-service
