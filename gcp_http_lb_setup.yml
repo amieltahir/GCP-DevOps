@@ -4,11 +4,11 @@
   gather_facts: no
 
   vars:
-    project_id: YOUR_PROJECT_ID_HERE
-    zone: us-east1-b
-    region: us-east1
-    template_name: global-template
-    instance_group: global-mig
+    project_id: qwiklabs-gcp-02-84d262accd9a
+    zone: us-west4-c
+    region: us-west4
+    template_name: web-server-template
+    instance_group: webserver-group
     startup_script: |
       #! /bin/bash
       apt-get update
@@ -40,11 +40,12 @@
 
     - name: Create jumphost instance
       command: >
-        gcloud compute instances create nucleus-jumphost-198
+        gcloud compute instances create nucleus-jumphost-546
         --zone={{ zone }}
         --machine-type=e2-micro
         --image-family=debian-11
         --image-project=debian-cloud
+        --network=default
       register: jumphost
     - debug:
         msg: "{{ jumphost.stdout }}"
@@ -62,6 +63,7 @@
         --image-family=debian-11
         --image-project=debian-cloud
         --tags=allow-health-check
+        --network=default
         --metadata-from-file startup-script=./startup.sh
       register: template
     - debug:
@@ -80,7 +82,7 @@
 
     - name: Create firewall rule
       command: >
-        gcloud compute firewall-rules create permit-tcp-rule-123
+        gcloud compute firewall-rules create grant-tcp-rule-674
         --direction=INGRESS
         --priority=1000
         --network=default
